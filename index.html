@@ -1,199 +1,38 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
-<title>Control Ventilador ESP32</title>
-
-<style>
-body { background:#111; color:#eee; font-family:Arial; text-align:center; margin:0; padding:20px; }
-
-.main-container {
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 20px;
-}
-
-.card, .chart-area {
-    background:#1c1f24;
-    padding:20px;
-    border-radius:12px;
-    margin:10px;
-    box-shadow:0 0 10px rgba(0,0,0,0.35);
-}
-
-.chart-area { min-width: 400px; max-width: 450px; }
-.card { min-width: 300px; }
-
-h1 {
-    margin-bottom: 20px;
-    color:#00c896;
-    text-shadow: 0 0 8px #00c896;
-}
-
-/* Switch */
-.switch { width:60px; height:34px; position:relative; display:inline-block; }
-.switch input { display:none; }
-.slider {
-    background:#555; position:absolute; cursor:pointer;
-    top:0; left:0; right:0; bottom:0; transition:.4s;
-    border-radius:34px;
-}
-.slider:before {
-    content:""; position:absolute; height:26px; width:26px;
-    left:4px; bottom:4px; background:white; border-radius:50%;
-    transition:.4s;
-}
-input:checked + .slider { background:#00c896; }
-input:checked + .slider:before { transform:translateX(26px); }
-
-button {
-    background:#00c896;
-    border:none;
-    padding:10px 18px;
-    border-radius:8px;
-    cursor:pointer;
-    margin-top:8px;
-    font-weight:bold;
-    color:#111;
-}
-button:hover { background:#1ce3b8; }
-</style>
-</head>
-
-<body>
-
-<h1>ESP32 FAN CONTROL</h1>
-
-<div class="main-container">
-
-    <!-- PANEL DE CONTROL -->
-    <div class="card">
-        <div>🌡 Temp: <span id="temp">--</span> °C</div>
-        <div>💧 Humedad: <span id="hum">--</span> %</div>
-        <div>⚡ Energía total: <span id="energy">--</span> Wh</div>
-
-        <h3 id="estado">Ventilador apagado</h3>
-
-        <label class="switch">
-            <input type="checkbox" id="toggleSwitch">
-            <span class="slider"></span>
-        </label>
-
-        <br><br>
-        <button onclick="autoMode()">Modo Automático</button>
-        <br>
-        <button onclick="verLog()">Ver Registro</button>
-    </div>
-
-    <!-- GRÁFICA 1 -->
-    <div class="chart-area">
-        <h2>Consumo Acumulado (Wh)</h2>
-        <canvas id="energyChart" width="400" height="300"></canvas>
-    </div>
-
-    <!-- GRÁFICA 2 -->
-    <div class="chart-area">
-        <h2>Consumo por Intervalo (Wh)</h2>
-        <canvas id="energyDeltaChart" width="400" height="300"></canvas>
-    </div>
-
-</div>
-
-<script>
-const ESP_IP = "http://192.168.0.21";  // ← IP REAL DEL ESP32
-
-let energyChart;
-let energyDeltaChart;
-const CHART_LABELS = [...Array(10).keys()].map(n => "L" + (n + 1));
-
-function initChart() {
-    const ctx1 = document.getElementById("energyChart").getContext("2d");
-    energyChart = new Chart(ctx1, {
-        type: "line",
-        data: {
-            labels: CHART_LABELS,
-            datasets: [{
-                label: "Consumo acumulado (Wh)",
-                data: Array(10).fill(0),
-                borderColor: "#00c896",
-                backgroundColor: "rgba(0, 200, 150, 0.2)",
-                tension: 0.4
-            }]
-        },
-        options: { scales: { y: { beginAtZero: true } } }
-    });
-
-    const ctx2 = document.getElementById("energyDeltaChart").getContext("2d");
-    energyDeltaChart = new Chart(ctx2, {
-        type: "bar",
-        data: {
-            labels: CHART_LABELS,
-            datasets: [{
-                label: "Consumo por intervalo (Wh)",
-                data: Array(10).fill(0),
-                backgroundColor: "rgba(74,222,128,0.3)",
-                borderColor: "#4ade80"
-            }]
-        },
-        options: { scales: { y: { beginAtZero: true } } }
-    });
-}
-
-async function fetchData() {
-    try {
-        const r = await fetch(ESP_IP + "/data");
-        const d = await r.json();
-
-        document.getElementById("temp").innerText   = d.temperature;
-        document.getElementById("hum").innerText    = d.humidity;
-        document.getElementById("energy").innerText = d.energy;
-
-        const toggle = document.getElementById("toggleSwitch");
-
-        if (d.ventState) {
-            document.getElementById("estado").innerText = "Ventilador ENCENDIDO";
-            toggle.checked = true;
-        } else {
-            document.getElementById("estado").innerText = "Ventilador APAGADO";
-            toggle.checked = false;
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Ventilador ESP32</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
         }
 
-        energyChart.data.datasets[0].data = d.chartData;
-        energyChart.update();
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 14px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+            margin-bottom: 20px;
+        }
 
-        energyDeltaChart.data.datasets[0].data = d.chartDelta;
-        energyDeltaChart.update();
+        .title {
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
 
-    } catch (e) {
-        console.error("Error obteniendo datos del ESP32:", e);
-    }
-}
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+        }
 
-document.getElementById("toggleSwitch").addEventListener("change", async (e) => {
-    const state = e.target.checked ? "on" : "off";
-    await fetch(ESP_IP + "/fan?state=" + state);
-    fetchData();
-});
-
-async function autoMode() {
-    await fetch(ESP_IP + "/auto");
-    fetchData();
-}
-
-async function verLog() {
-    const r = await fetch(ESP_IP + "/log");
-    alert(await r.text());
-}
-
-window.onload = () => {
-    initChart();
-    fetchData();
-    setInterval(fetchData, 2000);
-};
-</script>
-
-</body>
-</html>
+       
