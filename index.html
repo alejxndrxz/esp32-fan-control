@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Control de Ventilación - ESP32</title>
+
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            background: #111;
+            color: white;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: auto;
+            padding: 20px;
+        }
+
+        h1, h2 {
+            text-align: center;
+        }
+
+        .card {
+            background: #222;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 12px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: #1e90ff;
+            color: white;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            opacity: 0.8;
+        }
+
+        #logBox {
+            background: #000;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 8px;
+            height: 250px;
+            overflow-y: scroll;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+
+        <h1>Panel de Control del Ventilador</h1>
+
+        <div class="card">
+            <h2>Lectura Actual</h2>
+            <p>Temperatura: <span id="tempText">--</span> °C</p>
+            <p>Humedad: <span id="humText">--</span> %</p>
+            <p>Estado del ventilador: <span id="fanText">--</span></p>
+        </div>
+
+        <div class="card">
+            <h2>Gráfica en tiempo real</h2>
+            <canvas id="chart"></canvas>
+        </div>
+
+        <div class="card">
+            <h2>Control manual</h2>
+            <button onclick="fanOn()">Encender</button>
+            <button onclick="fanOff()">Apagar</button>
+            <button onclick="fanAuto()">Modo Automático</button>
+        </div>
+
+        <div class="card">
+            <h2>Registro de eventos</h2>
+            <button onclick="loadLog()">Actualizar</button>
+            <div id="logBox">Cargando...</div>
+        </div>
+
+    </div>
+
+    <script>
+    
+        const ESP32 = "http://192.168.0.14";  
+
+        // ---------------------------
+        // FUNCIONES FETCH AL ESP32
+        // ---------------------------
+
+        async function getData() {
+            try {
+                const res = await fetch(`${ESP32}/data`);
+                const data = await res.json();
+
+                // Actualiza texto
+                document.getElementById("tempText").textContent = data.temperatura;
+                document.getElementById("humText").textContent = data.humedad;
+                document.getElementById("fanText").textContent = data.fan;
+
+                // Actualiza gráfica
+                updateChart(data.temperatura, data.humedad);
+
+            } catch (e) {
+                console.log("Error obteniendo datos:", e);
+            }
+        }
+
+        async function fanOn() {
+            await fetch(`${ESP32}/fan?state=on`);
+        }
+
+        async function fanOff() {
+            await fetch(`${ESP32}/fan?state=off`);
+        }
+
+        async function fanAuto() {
+            await fetch(`${ESP32}/auto`);
+        }
+
+        async function loadLog() {
+            try {
+                const res = await fetch(`${ESP32}/log`);
+                const text = await res.text();
+                document.getElementById("logBox").textContent = text;
+            } catch (e) {
+                document.getElementById("logBox").textContent = "Error cargando log.";
+            }
+        }
+
+        // ---------------------------
+        // GRÁFICA EN TIEMPO REAL
+        // ---------------------------
+
+        const ctx = document.getElementById("chart");
+
+        const chart = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: "Temperatura",
+                        data: [],
+                        borderColor: "red"
+                    },
+                    {
+                        label: "Humedad",
+                        data: [],
+                        borderColor: "cyan"
+                    }
+                ]
+            },
+            options: {
+                scales: {
+                    y: { beginAtZero: false }
+                }
+            }
+        });
+
+        function updateChart(temp, hum) {
+            const now = new Date().toLocaleTimeString();
+
+            chart.data.labels.push(now);
+            chart.data.datasets[0].data.push(temp);
+            chart.data.datasets[1].data.push(hum);
+
+            if (chart.data.labels.length > 20) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+                chart.data.datasets[1].data.shift();
+            }
+
+            chart.update();
+        }
+
+        // ---------------------------
+        // INTERVALOS
+        // ---------------------------
+        setInterval(getData, 2000);
+        loadLog();
+    </script>
+
+</body>
+</html>
