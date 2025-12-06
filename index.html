@@ -1,199 +1,292 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Control de Ventilación - ESP32</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+<title>Control Ventilador ESP32</title>
+<style>
+    :root {
+        --bg-dark: #0d1117;
+        --bg-card: #161b22;
+        --text-primary: #e6edf3;
+        --text-secondary: #8b949e;
+        --accent-blue: #00a8ff;
+        --accent-blue-dim: rgba(0, 168, 255, 0.2);
+        --border-color: #30363d;
+    }
 
-    <!-- Chart.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    body {
+        background: var(--bg-dark);
+        color: var(--text-primary);
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        text-align: center;
+        margin: 0;
+        padding: 20px;
+        box-sizing: border-box;
+    }
 
-    <style>
-        body {
-            background: #111;
-            color: white;
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
+    h1 {
+        color: var(--accent-blue);
+        margin-bottom: 30px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .main-container {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 25px;
+        max-width: 1200px;
+        margin: auto;
+    }
+
+    @media (min-width: 768px) {
+        .main-container {
+            grid-template-columns: repeat(2, 1fr);
         }
-
-        .container {
-            max-width: 900px;
-            margin: auto;
-            padding: 20px;
+        /* Panel de control ocupa las 2 columnas en escritorio */
+        .control-card {
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+            align-items: start;
         }
-
-        h1, h2 {
-            text-align: center;
+        .data-section {
+            border-right: 1px solid var(--border-color);
+            padding-right: 25px;
         }
+    }
 
-        .card {
-            background: #222;
-            padding: 20px;
-            border-radius: 10px;
-            margin-top: 20px;
-        }
+    .card, .chart-area {
+        background: var(--bg-card);
+        padding: 25px;
+        border-radius: 16px;
+        box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        border: 1px solid var(--border-color);
+    }
 
-        button {
-            padding: 12px 20px;
-            font-size: 16px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            background: #1e90ff;
-            color: white;
-            margin-right: 10px;
-        }
+    /* Estilos para el Panel de Control */
+    .data-item {
+        font-size: 1.2rem;
+        margin: 15px 0;
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 8px;
+    }
 
-        button:hover {
-            opacity: 0.8;
-        }
+    .data-item span {
+        color: var(--accent-blue);
+        font-weight: bold;
+    }
 
-        #logBox {
-            background: #000;
-            color: #0f0;
-            padding: 10px;
-            border-radius: 8px;
-            height: 250px;
-            overflow-y: scroll;
-            font-family: monospace;
-            white-space: pre-wrap;
-        }
-    </style>
+    #estado {
+        color: var(--text-secondary);
+        font-size: 1.4rem;
+        margin: 20px 0;
+    }
+    #estado.on { color: var(--accent-blue); }
+
+    /* Estilos para Gráficas */
+    .chart-area h2 {
+        color: var(--accent-blue);
+        font-size: 1.3rem;
+        margin-bottom: 20px;
+    }
+    
+    .chart-area canvas {
+        max-height: 300px;
+    }
+
+    /* Controles */
+    .switch { width: 60px; height: 34px; position: relative; display: inline-block; margin: 15px 0;}
+    .switch input { display: none; }
+    .slider { background: #333; position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; transition: .4s; border-radius: 34px; }
+    .slider:before { content: ""; position: absolute; height: 26px; width: 26px; left: 4px; bottom: 4px; background: white; border-radius: 50%; transition: .4s; }
+    input:checked + .slider { background: var(--accent-blue); }
+    input:checked + .slider:before { transform: translateX(26px); }
+
+    button {
+        background: var(--bg-card);
+        color: var(--accent-blue);
+        border: 2px solid var(--accent-blue);
+        padding: 12px 24px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 1rem;
+        transition: all 0.3s ease;
+        margin: 5px;
+        font-weight: bold;
+    }
+    button:hover {
+        background: var(--accent-blue);
+        color: var(--bg-dark);
+    }
+
+</style>
 </head>
 <body>
 
-    <div class="container">
+<h1>ESP32 FAN CONTROL</h1>
 
-        <h1>Panel de Control del Ventilador</h1>
+<div class="main-container">
 
-        <div class="card">
-            <h2>Lectura Actual</h2>
-            <p>Temperatura: <span id="tempText">--</span> °C</p>
-            <p>Humedad: <span id="humText">--</span> %</p>
-            <p>Estado del ventilador: <span id="fanText">--</span></p>
+    <div class="card control-card">
+        <div class="data-section">
+            <div class="data-item">🌡 Temp: <span id="temp">--</span> °C</div>
+            <div class="data-item">💧 Humedad: <span id="hum">--</span> %</div>
+            <div class="data-item">⚡ Energía total: <span id="energy">--</span> Wh</div>
         </div>
-
-        <div class="card">
-            <h2>Gráfica en tiempo real</h2>
-            <canvas id="chart"></canvas>
+        <div class="controls-section">
+            <h3 id="estado">Ventilador apagado</h3>
+            <label class="switch">
+                <input type="checkbox" id="toggleSwitch">
+                <span class="slider"></span>
+            </label>
+            <br>
+            <div>
+                <button onclick="autoMode()">Modo Automático</button>
+                <button onclick="verLog()">Ver Registro</button>
+            </div>
         </div>
-
-        <div class="card">
-            <h2>Control manual</h2>
-            <button onclick="fanOn()">Encender</button>
-            <button onclick="fanOff()">Apagar</button>
-            <button onclick="fanAuto()">Modo Automático</button>
-        </div>
-
-        <div class="card">
-            <h2>Registro de eventos</h2>
-            <button onclick="loadLog()">Actualizar</button>
-            <div id="logBox">Cargando...</div>
-        </div>
-
     </div>
 
-    <script>
-    
-        const ESP32 = "http://192.168.0.14";  
+    <div class="chart-area">
+        <h2>Consumo Acumulado (Wh)</h2>
+        <canvas id="energyChart"></canvas>
+    </div>
 
-        // ---------------------------
-        // FUNCIONES FETCH AL ESP32
-        // ---------------------------
+    <div class="chart-area">
+        <h2>Consumo por Intervalo (Wh)</h2>
+        <canvas id="energyDeltaChart"></canvas>
+    </div>
 
-        async function getData() {
-            try {
-                const res = await fetch(`${ESP32}/data`);
-                const data = await res.json();
+</div>
 
-                // Actualiza texto
-                document.getElementById("tempText").textContent = data.temperatura;
-                document.getElementById("humText").textContent = data.humedad;
-                document.getElementById("fanText").textContent = data.fan;
+<script>
+let energyChart;
+let energyDeltaChart;
+const CHART_LABELS = [...Array(10).keys()].map(n => "L" + (n + 1));
 
-                // Actualiza gráfica
-                updateChart(data.temperatura, data.humedad);
-
-            } catch (e) {
-                console.log("Error obteniendo datos:", e);
-            }
-        }
-
-        async function fanOn() {
-            await fetch(`${ESP32}/fan?state=on`);
-        }
-
-        async function fanOff() {
-            await fetch(`${ESP32}/fan?state=off`);
-        }
-
-        async function fanAuto() {
-            await fetch(`${ESP32}/auto`);
-        }
-
-        async function loadLog() {
-            try {
-                const res = await fetch(`${ESP32}/log`);
-                const text = await res.text();
-                document.getElementById("logBox").textContent = text;
-            } catch (e) {
-                document.getElementById("logBox").textContent = "Error cargando log.";
-            }
-        }
-
-        // ---------------------------
-        // GRÁFICA EN TIEMPO REAL
-        // ---------------------------
-
-        const ctx = document.getElementById("chart");
-
-        const chart = new Chart(ctx, {
-            type: "line",
-            data: {
-                labels: [],
-                datasets: [
-                    {
-                        label: "Temperatura",
-                        data: [],
-                        borderColor: "red"
-                    },
-                    {
-                        label: "Humedad",
-                        data: [],
-                        borderColor: "cyan"
-                    }
-                ]
+function initChart() {
+    const commonOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true,
+                title: { display: true, color: '#8b949e' }, // Título del eje Y dinámico
+                grid: { color: '#30363d' },
+                ticks: { color: '#8b949e', font: { family: 'Segoe UI' } }
             },
-            options: {
-                scales: {
-                    y: { beginAtZero: false }
-                }
+            x: {
+                grid: { color: '#30363d' },
+                ticks: { color: '#8b949e', font: { family: 'Segoe UI' } }
             }
-        });
-
-        function updateChart(temp, hum) {
-            const now = new Date().toLocaleTimeString();
-
-            chart.data.labels.push(now);
-            chart.data.datasets[0].data.push(temp);
-            chart.data.datasets[1].data.push(hum);
-
-            if (chart.data.labels.length > 20) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-                chart.data.datasets[1].data.shift();
-            }
-
-            chart.update();
+        },
+        plugins: {
+            legend: { labels: { color: '#e6edf3', font: { family: 'Segoe UI' } } }
         }
+    };
 
-        // ---------------------------
-        // INTERVALOS
-        // ---------------------------
-        setInterval(getData, 2000);
-        loadLog();
-    </script>
+    // Gráfica Acumulada (Línea)
+    const ctx1 = document.getElementById("energyChart").getContext("2d");
+    energyChart = new Chart(ctx1, {
+        type: "line",
+        data: {
+            labels: CHART_LABELS,
+            datasets: [{
+                label: "Acumulado (Wh)",
+                data: Array(10).fill(0),
+                borderColor: "#00a8ff", // Azul brillante
+                backgroundColor: "rgba(0, 168, 255, 0.15)", // Azul transparente
+                tension: 0.4,
+                pointBackgroundColor: "#00a8ff",
+                pointBorderColor: "#fff",
+                pointHoverRadius: 6
+            }]
+        },
+        options: {
+            ...commonOptions,
+            scales: { ...commonOptions.scales, y: { ...commonOptions.scales.y, title: { text: 'Wh' } } }
+        }
+    });
+
+    // Gráfica por Intervalo (Barras)
+    const ctx2 = document.getElementById("energyDeltaChart").getContext("2d");
+    energyDeltaChart = new Chart(ctx2, {
+        type: "bar",
+        data: {
+            labels: CHART_LABELS,
+            datasets: [{
+                label: "Por Intervalo (Wh)",
+                data: Array(10).fill(0),
+                backgroundColor: "rgba(0, 168, 255, 0.6)", // Azul semi-transparente
+                borderColor: "#00a8ff",
+                borderWidth: 1,
+                borderRadius: 4, // Bordes redondeados en barras
+                hoverBackgroundColor: "#00a8ff"
+            }]
+        },
+        options: {
+            ...commonOptions,
+            scales: { ...commonOptions.scales, y: { ...commonOptions.scales.y, title: { text: 'Wh/Intervalo' } } }
+        }
+    });
+}
+
+async function fetchData() {
+    const r = await fetch("/data");
+    const d = await r.json();
+
+    document.getElementById("temp").innerText    = d.temperature;
+    document.getElementById("hum").innerText     = d.humidity;
+    document.getElementById("energy").innerText  = d.energy;
+
+    const toggle = document.getElementById("toggleSwitch");
+    const estadoElem = document.getElementById("estado");
+
+    if (d.ventState) {
+        estadoElem.innerText = "Ventilador ENCENDIDO";
+        estadoElem.classList.add("on"); // Clase CSS para color
+        toggle.checked = true;
+    } else {
+        estadoElem.innerText = "Ventilador APAGADO";
+        estadoElem.classList.remove("on"); // Quitar clase
+        toggle.checked = false;
+    }
+
+    energyChart.data.datasets[0].data = d.chartData;
+    energyChart.update();
+
+    energyDeltaChart.data.datasets[0].data = d.chartDelta;
+    energyDeltaChart.update();
+}
+
+document.getElementById("toggleSwitch").addEventListener("change", async (e) => {
+    const state = e.target.checked ? "on" : "off";
+    await fetch("/fan?state=" + state);
+    fetchData();
+});
+
+async function autoMode() {
+    await fetch("/auto");
+    fetchData();
+}
+
+async function verLog() {
+    const r = await fetch("/log");
+    alert(await r.text());
+}
+
+window.onload = () => {
+    initChart();
+    fetchData();
+    setInterval(fetchData, 2000);
+};
+</script>
 
 </body>
 </html>
