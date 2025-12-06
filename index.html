@@ -1,166 +1,93 @@
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
 <title>Control Ventilador ESP32</title>
+
 <style>
-    :root {
-        --bg-dark: #0d1117;
-        --bg-card: #161b22;
-        --text-primary: #e6edf3;
-        --text-secondary: #8b949e;
-        --accent-blue: #00a8ff;
-        --accent-blue-dim: rgba(0, 168, 255, 0.2);
-        --border-color: #30363d;
-    }
+body {
+    background:#111;
+    color:#eee;
+    font-family:Arial;
+    text-align:center;
+}
+.main-container {
+    display:flex;
+    justify-content:center;
+    flex-wrap:wrap;
+    gap:20px;
+}
+.card, .chart-area {
+    background:#1c1f24;
+    padding:20px;
+    border-radius:12px;
+    margin:10px;
+}
+.chart-area { min-width:400px; max-width:450px; }
+.card { min-width:300px; }
 
-    body {
-        background: var(--bg-dark);
-        color: var(--text-primary);
-        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        text-align: center;
-        margin: 0;
-        padding: 20px;
-        box-sizing: border-box;
-    }
-
-    h1 {
-        color: var(--accent-blue);
-        margin-bottom: 30px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-
-    .main-container {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 25px;
-        max-width: 1200px;
-        margin: auto;
-    }
-
-    @media (min-width: 768px) {
-        .main-container {
-            grid-template-columns: repeat(2, 1fr);
-        }
-        /* Panel de control ocupa las 2 columnas en escritorio */
-        .control-card {
-            grid-column: 1 / -1;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 25px;
-            align-items: start;
-        }
-        .data-section {
-            border-right: 1px solid var(--border-color);
-            padding-right: 25px;
-        }
-    }
-
-    .card, .chart-area {
-        background: var(--bg-card);
-        padding: 25px;
-        border-radius: 16px;
-        box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-        border: 1px solid var(--border-color);
-    }
-
-    /* Estilos para el Panel de Control */
-    .data-item {
-        font-size: 1.2rem;
-        margin: 15px 0;
-        display: flex;
-        justify-content: space-between;
-        border-bottom: 1px solid var(--border-color);
-        padding-bottom: 8px;
-    }
-
-    .data-item span {
-        color: var(--accent-blue);
-        font-weight: bold;
-    }
-
-    #estado {
-        color: var(--text-secondary);
-        font-size: 1.4rem;
-        margin: 20px 0;
-    }
-    #estado.on { color: var(--accent-blue); }
-
-    /* Estilos para Gráficas */
-    .chart-area h2 {
-        color: var(--accent-blue);
-        font-size: 1.3rem;
-        margin-bottom: 20px;
-    }
-    
-    .chart-area canvas {
-        max-height: 300px;
-    }
-
-    /* Controles */
-    .switch { width: 60px; height: 34px; position: relative; display: inline-block; margin: 15px 0;}
-    .switch input { display: none; }
-    .slider { background: #333; position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; transition: .4s; border-radius: 34px; }
-    .slider:before { content: ""; position: absolute; height: 26px; width: 26px; left: 4px; bottom: 4px; background: white; border-radius: 50%; transition: .4s; }
-    input:checked + .slider { background: var(--accent-blue); }
-    input:checked + .slider:before { transform: translateX(26px); }
-
-    button {
-        background: var(--bg-card);
-        color: var(--accent-blue);
-        border: 2px solid var(--accent-blue);
-        padding: 12px 24px;
-        border-radius: 8px;
-        cursor: pointer;
-        font-size: 1rem;
-        transition: all 0.3s ease;
-        margin: 5px;
-        font-weight: bold;
-    }
-    button:hover {
-        background: var(--accent-blue);
-        color: var(--bg-dark);
-    }
-
+.switch { width:60px; height:34px; position:relative; display:inline-block; }
+.switch input { display:none; }
+.slider {
+    background:#555; position:absolute; cursor:pointer;
+    top:0; left:0; right:0; bottom:0;
+    transition:.4s; border-radius:34px;
+}
+.slider:before {
+    content:""; position:absolute;
+    height:26px; width:26px;
+    left:4px; bottom:4px;
+    background:white;
+    border-radius:50%;
+    transition:.4s;
+}
+input:checked + .slider { background:#00c896; }
+input:checked + .slider:before { transform:translateX(26px); }
 </style>
 </head>
+
 <body>
 
 <h1>ESP32 FAN CONTROL</h1>
 
+<!-- CONFIGURACIÓN: PON AQUÍ LA IP DE TU ESP32 -->
+<script>
+// 🔥 IMPORTANTE: CAMBIA ESTA IP POR LA QUE MUESTRA TU ESP32 EN EL SERIAL
+const ESP32_IP = "http://192.168.0.14";
+</script>
+
 <div class="main-container">
 
-    <div class="card control-card">
-        <div class="data-section">
-            <div class="data-item">🌡 Temp: <span id="temp">--</span> °C</div>
-            <div class="data-item">💧 Humedad: <span id="hum">--</span> %</div>
-            <div class="data-item">⚡ Energía total: <span id="energy">--</span> Wh</div>
-        </div>
-        <div class="controls-section">
-            <h3 id="estado">Ventilador apagado</h3>
-            <label class="switch">
-                <input type="checkbox" id="toggleSwitch">
-                <span class="slider"></span>
-            </label>
-            <br>
-            <div>
-                <button onclick="autoMode()">Modo Automático</button>
-                <button onclick="verLog()">Ver Registro</button>
-            </div>
-        </div>
+    <!-- PRIMERO EL PANEL (lo que pediste) -->
+    <div class="card">
+        <div>🌡 Temp: <span id="temp">--</span> °C</div>
+        <div>💧 Humedad: <span id="hum">--</span> %</div>
+        <div>⚡ Energía total: <span id="energy">--</span> Wh</div>
+
+        <h3 id="estado">Ventilador apagado</h3>
+
+        <label class="switch">
+            <input type="checkbox" id="toggleSwitch">
+            <span class="slider"></span>
+        </label>
+
+        <br><br>
+        <button onclick="autoMode()">Modo Automático</button>
+        <br><br>
+        <button onclick="verLog()">Ver Registro</button>
     </div>
 
+    <!-- DESPUÉS LAS GRÁFICAS -->
     <div class="chart-area">
         <h2>Consumo Acumulado (Wh)</h2>
-        <canvas id="energyChart"></canvas>
+        <canvas id="energyChart" width="400" height="300"></canvas>
     </div>
 
     <div class="chart-area">
         <h2>Consumo por Intervalo (Wh)</h2>
-        <canvas id="energyDeltaChart"></canvas>
+        <canvas id="energyDeltaChart" width="400" height="300"></canvas>
     </div>
 
 </div>
@@ -171,113 +98,93 @@ let energyDeltaChart;
 const CHART_LABELS = [...Array(10).keys()].map(n => "L" + (n + 1));
 
 function initChart() {
-    const commonOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-            y: {
-                beginAtZero: true,
-                title: { display: true, color: '#8b949e' }, // Título del eje Y dinámico
-                grid: { color: '#30363d' },
-                ticks: { color: '#8b949e', font: { family: 'Segoe UI' } }
-            },
-            x: {
-                grid: { color: '#30363d' },
-                ticks: { color: '#8b949e', font: { family: 'Segoe UI' } }
-            }
-        },
-        plugins: {
-            legend: { labels: { color: '#e6edf3', font: { family: 'Segoe UI' } } }
-        }
-    };
-
-    // Gráfica Acumulada (Línea)
     const ctx1 = document.getElementById("energyChart").getContext("2d");
     energyChart = new Chart(ctx1, {
         type: "line",
         data: {
             labels: CHART_LABELS,
             datasets: [{
-                label: "Acumulado (Wh)",
+                label: "Consumo acumulado (Wh)",
                 data: Array(10).fill(0),
-                borderColor: "#00a8ff", // Azul brillante
-                backgroundColor: "rgba(0, 168, 255, 0.15)", // Azul transparente
-                tension: 0.4,
-                pointBackgroundColor: "#00a8ff",
-                pointBorderColor: "#fff",
-                pointHoverRadius: 6
+                borderColor: "#00c896",
+                backgroundColor: "rgba(0, 200, 150, 0.2)",
+                tension: 0.4
             }]
         },
         options: {
-            ...commonOptions,
-            scales: { ...commonOptions.scales, y: { ...commonOptions.scales.y, title: { text: 'Wh' } } }
+            scales: {
+                y: { beginAtZero: true, ticks:{color:"#eee"}, grid:{color:"rgba(255,255,255,0.1)"} },
+                x: { ticks:{color:"#eee"}, grid:{color:"rgba(255,255,255,0.1)"} }
+            },
+            plugins:{ legend:{ labels:{ color:"#eee" }}}
         }
     });
 
-    // Gráfica por Intervalo (Barras)
     const ctx2 = document.getElementById("energyDeltaChart").getContext("2d");
     energyDeltaChart = new Chart(ctx2, {
         type: "bar",
         data: {
             labels: CHART_LABELS,
             datasets: [{
-                label: "Por Intervalo (Wh)",
+                label: "Consumo por intervalo (Wh)",
                 data: Array(10).fill(0),
-                backgroundColor: "rgba(0, 168, 255, 0.6)", // Azul semi-transparente
-                borderColor: "#00a8ff",
-                borderWidth: 1,
-                borderRadius: 4, // Bordes redondeados en barras
-                hoverBackgroundColor: "#00a8ff"
+                borderColor: "#4ade80",
+                backgroundColor: "rgba(74, 222, 128, 0.3)"
             }]
         },
         options: {
-            ...commonOptions,
-            scales: { ...commonOptions.scales, y: { ...commonOptions.scales.y, title: { text: 'Wh/Intervalo' } } }
+            scales: {
+                y: { beginAtZero:true, ticks:{color:"#eee"}, grid:{color:"rgba(255,255,255,0.1)"} },
+                x: { ticks:{color:"#eee"}, grid:{color:"rgba(255,255,255,0.1)"} }
+            },
+            plugins:{ legend:{ labels:{ color:"#eee" }}}
         }
     });
 }
 
 async function fetchData() {
-    const r = await fetch("/data");
-    const d = await r.json();
+    try {
+        const r = await fetch(`${ESP32_IP}/data`);
+        const d = await r.json();
 
-    document.getElementById("temp").innerText    = d.temperature;
-    document.getElementById("hum").innerText     = d.humidity;
-    document.getElementById("energy").innerText  = d.energy;
+        document.getElementById("temp").innerText   = d.temperature;
+        document.getElementById("hum").innerText    = d.humidity;
+        document.getElementById("energy").innerText = d.energy;
 
-    const toggle = document.getElementById("toggleSwitch");
-    const estadoElem = document.getElementById("estado");
+        const toggle = document.getElementById("toggleSwitch");
 
-    if (d.ventState) {
-        estadoElem.innerText = "Ventilador ENCENDIDO";
-        estadoElem.classList.add("on"); // Clase CSS para color
-        toggle.checked = true;
-    } else {
-        estadoElem.innerText = "Ventilador APAGADO";
-        estadoElem.classList.remove("on"); // Quitar clase
-        toggle.checked = false;
+        if (d.ventState) {
+            document.getElementById("estado").innerText = "Ventilador ENCENDIDO";
+            toggle.checked = true;
+        } else {
+            document.getElementById("estado").innerText = "Ventilador APAGADO";
+            toggle.checked = false;
+        }
+
+        energyChart.data.datasets[0].data = d.chartData;
+        energyChart.update();
+
+        energyDeltaChart.data.datasets[0].data = d.chartDelta;
+        energyDeltaChart.update();
+
+    } catch (e) {
+        console.log("Error consultando ESP32:", e);
     }
-
-    energyChart.data.datasets[0].data = d.chartData;
-    energyChart.update();
-
-    energyDeltaChart.data.datasets[0].data = d.chartDelta;
-    energyDeltaChart.update();
 }
 
 document.getElementById("toggleSwitch").addEventListener("change", async (e) => {
     const state = e.target.checked ? "on" : "off";
-    await fetch("/fan?state=" + state);
+    await fetch(`${ESP32_IP}/fan?state=${state}`);
     fetchData();
 });
 
 async function autoMode() {
-    await fetch("/auto");
+    await fetch(`${ESP32_IP}/auto`);
     fetchData();
 }
 
 async function verLog() {
-    const r = await fetch("/log");
+    const r = await fetch(`${ESP32_IP}/log`);
     alert(await r.text());
 }
 
