@@ -7,44 +7,59 @@
 <title>Control Ventilador ESP32</title>
 
 <style>
-body {
-    background:#111;
-    color:#eee;
-    font-family:Arial;
-    text-align:center;
-}
+body { background:#111; color:#eee; font-family:Arial; text-align:center; margin:0; padding:20px; }
+
 .main-container {
-    display:flex;
-    justify-content:center;
-    flex-wrap:wrap;
-    gap:20px;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 20px;
 }
+
 .card, .chart-area {
     background:#1c1f24;
     padding:20px;
     border-radius:12px;
     margin:10px;
+    box-shadow:0 0 10px rgba(0,0,0,0.35);
 }
-.chart-area { min-width:400px; max-width:450px; }
-.card { min-width:300px; }
 
+.chart-area { min-width: 400px; max-width: 450px; }
+.card { min-width: 300px; }
+
+h1 {
+    margin-bottom: 20px;
+    color:#00c896;
+    text-shadow: 0 0 8px #00c896;
+}
+
+/* Switch */
 .switch { width:60px; height:34px; position:relative; display:inline-block; }
 .switch input { display:none; }
 .slider {
     background:#555; position:absolute; cursor:pointer;
-    top:0; left:0; right:0; bottom:0;
-    transition:.4s; border-radius:34px;
+    top:0; left:0; right:0; bottom:0; transition:.4s;
+    border-radius:34px;
 }
 .slider:before {
-    content:""; position:absolute;
-    height:26px; width:26px;
-    left:4px; bottom:4px;
-    background:white;
-    border-radius:50%;
+    content:""; position:absolute; height:26px; width:26px;
+    left:4px; bottom:4px; background:white; border-radius:50%;
     transition:.4s;
 }
 input:checked + .slider { background:#00c896; }
 input:checked + .slider:before { transform:translateX(26px); }
+
+button {
+    background:#00c896;
+    border:none;
+    padding:10px 18px;
+    border-radius:8px;
+    cursor:pointer;
+    margin-top:8px;
+    font-weight:bold;
+    color:#111;
+}
+button:hover { background:#1ce3b8; }
 </style>
 </head>
 
@@ -52,15 +67,9 @@ input:checked + .slider:before { transform:translateX(26px); }
 
 <h1>ESP32 FAN CONTROL</h1>
 
-<!-- CONFIGURACIÓN: PON AQUÍ LA IP DE TU ESP32 -->
-<script>
-// 🔥 IMPORTANTE: CAMBIA ESTA IP POR LA QUE MUESTRA TU ESP32 EN EL SERIAL
-const ESP32_IP = "http://192.168.0.14";
-</script>
-
 <div class="main-container">
 
-    <!-- PRIMERO EL PANEL (lo que pediste) -->
+    <!-- PANEL DE CONTROL -->
     <div class="card">
         <div>🌡 Temp: <span id="temp">--</span> °C</div>
         <div>💧 Humedad: <span id="hum">--</span> %</div>
@@ -75,16 +84,17 @@ const ESP32_IP = "http://192.168.0.14";
 
         <br><br>
         <button onclick="autoMode()">Modo Automático</button>
-        <br><br>
+        <br>
         <button onclick="verLog()">Ver Registro</button>
     </div>
 
-    <!-- DESPUÉS LAS GRÁFICAS -->
+    <!-- GRÁFICA 1 -->
     <div class="chart-area">
         <h2>Consumo Acumulado (Wh)</h2>
         <canvas id="energyChart" width="400" height="300"></canvas>
     </div>
 
+    <!-- GRÁFICA 2 -->
     <div class="chart-area">
         <h2>Consumo por Intervalo (Wh)</h2>
         <canvas id="energyDeltaChart" width="400" height="300"></canvas>
@@ -93,6 +103,8 @@ const ESP32_IP = "http://192.168.0.14";
 </div>
 
 <script>
+const ESP_IP = "http://192.168.0.21";  // ← IP REAL DEL ESP32
+
 let energyChart;
 let energyDeltaChart;
 const CHART_LABELS = [...Array(10).keys()].map(n => "L" + (n + 1));
@@ -111,13 +123,7 @@ function initChart() {
                 tension: 0.4
             }]
         },
-        options: {
-            scales: {
-                y: { beginAtZero: true, ticks:{color:"#eee"}, grid:{color:"rgba(255,255,255,0.1)"} },
-                x: { ticks:{color:"#eee"}, grid:{color:"rgba(255,255,255,0.1)"} }
-            },
-            plugins:{ legend:{ labels:{ color:"#eee" }}}
-        }
+        options: { scales: { y: { beginAtZero: true } } }
     });
 
     const ctx2 = document.getElementById("energyDeltaChart").getContext("2d");
@@ -128,23 +134,17 @@ function initChart() {
             datasets: [{
                 label: "Consumo por intervalo (Wh)",
                 data: Array(10).fill(0),
-                borderColor: "#4ade80",
-                backgroundColor: "rgba(74, 222, 128, 0.3)"
+                backgroundColor: "rgba(74,222,128,0.3)",
+                borderColor: "#4ade80"
             }]
         },
-        options: {
-            scales: {
-                y: { beginAtZero:true, ticks:{color:"#eee"}, grid:{color:"rgba(255,255,255,0.1)"} },
-                x: { ticks:{color:"#eee"}, grid:{color:"rgba(255,255,255,0.1)"} }
-            },
-            plugins:{ legend:{ labels:{ color:"#eee" }}}
-        }
+        options: { scales: { y: { beginAtZero: true } } }
     });
 }
 
 async function fetchData() {
     try {
-        const r = await fetch(`${ESP32_IP}/data`);
+        const r = await fetch(ESP_IP + "/data");
         const d = await r.json();
 
         document.getElementById("temp").innerText   = d.temperature;
@@ -168,23 +168,23 @@ async function fetchData() {
         energyDeltaChart.update();
 
     } catch (e) {
-        console.log("Error consultando ESP32:", e);
+        console.error("Error obteniendo datos del ESP32:", e);
     }
 }
 
 document.getElementById("toggleSwitch").addEventListener("change", async (e) => {
     const state = e.target.checked ? "on" : "off";
-    await fetch(`${ESP32_IP}/fan?state=${state}`);
+    await fetch(ESP_IP + "/fan?state=" + state);
     fetchData();
 });
 
 async function autoMode() {
-    await fetch(`${ESP32_IP}/auto`);
+    await fetch(ESP_IP + "/auto");
     fetchData();
 }
 
 async function verLog() {
-    const r = await fetch(`${ESP32_IP}/log`);
+    const r = await fetch(ESP_IP + "/log");
     alert(await r.text());
 }
 
