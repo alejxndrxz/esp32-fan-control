@@ -3,21 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 FAN CONTROL</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
-<title>Control Ventilador ESP32</title>
 <style>
 body { background:#111; color:#eee; font-family:Arial; text-align:center; }
-.main-container { display: flex; justify-content: center; flex-wrap: wrap; gap: 20px; }
+.main-container { display:flex; flex-wrap:wrap; justify-content:center; gap:20px; }
 .card, .chart-area { background:#1c1f24; padding:20px; border-radius:12px; margin:10px; }
-.chart-area { min-width: 400px; max-width: 450px; }
-.card { min-width: 300px; }
-.switch { width:60px; height:34px; position:relative; display:inline-block; }
-.switch input { display:none; }
-.slider { background:#555; position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; transition:.4s; border-radius:34px; }
-.slider:before { content:""; position:absolute; height:26px; width:26px; left:4px; bottom:4px; background:white; border-radius:50%; transition:.4s; }
-input:checked + .slider { background:#00c896; }
-input:checked + .slider:before { transform:translateX(26px); }
-button { cursor:pointer; padding: 10px 20px; border:none; border-radius:6px; background:#00c896; color:#111; font-weight:bold; }
+.chart-area { min-width:400px; max-width:450px; }
+.card { min-width:300px; }
 </style>
 </head>
 <body>
@@ -25,141 +20,62 @@ button { cursor:pointer; padding: 10px 20px; border:none; border-radius:6px; bac
 <h1>ESP32 FAN CONTROL</h1>
 
 <div class="main-container">
-
     <div class="chart-area">
-        <h2>Consumo Acumulado (Wh)</h2>
-        <canvas id="energyChart" width="400" height="300"></canvas>
+        <h2>Consumo Energía (Wh)</h2>
+        <canvas id="energyChart"></canvas>
     </div>
-
-    <div class="chart-area">
-        <h2>Consumo por Intervalo (Wh)</h2>
-        <canvas id="energyDeltaChart" width="400" height="300"></canvas>
-    </div>
-
     <div class="card">
         <div>🌡 Temp: <span id="temp">--</span> °C</div>
         <div>💧 Humedad: <span id="hum">--</span> %</div>
-        <div>⚡ Energía total: <span id="energy">--</span> Wh</div>
-
-        <h3 id="estado">Ventilador apagado</h3>
-
-        <label class="switch">
-        <input type="checkbox" id="toggleSwitch">
-        <span class="slider"></span>
-        </label>
-
-        <br><br>
-        <button onclick="autoMode()">Modo Automático</button>
-        <br><br>
-        <button onclick="verLog()">Ver Registro</button>
+        <div>⚡ Energía: <span id="energy">--</span> Wh</div>
+        <div id="estado">Ventilador apagado</div>
     </div>
-
 </div>
 
 <script>
+const firebaseConfig = {
+    databaseURL: "https://esp32-sisp-default-rtdb.firebaseio.com/"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
 let energyChart;
-let energyDeltaChart;
-const CHART_LABELS = [...Array(10).keys()].map(n => "L" + (n + 1));
+const CHART_SIZE = 10;
+let chartData = Array(CHART_SIZE).fill(0);
 
 function initChart() {
-    const ctx1 = document.getElementById("energyChart").getContext("2d");
-    energyChart = new Chart(ctx1, {
+    const ctx = document.getElementById("energyChart").getContext("2d");
+    energyChart = new Chart(ctx, {
         type: "line",
         data: {
-            labels: CHART_LABELS,
-            datasets: [{
-                label: "Consumo acumulado (Wh)",
-                data: Array(10).fill(0),
-                borderColor: "#00c896",
-                backgroundColor: "rgba(0, 200, 150, 0.2)",
-                tension: 0.4
-            }]
+            labels: Array.from({length: CHART_SIZE}, (_,i)=>i+1),
+            datasets: [{label:"Energía (Wh)", data:chartData, borderColor:"#00c896", backgroundColor:"rgba(0,200,150,0.2)", tension:0.4}]
         },
-        options: {
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'Wh', color: '#eee' }, 
-                     grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#eee' } },
-                x: { grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#eee' } }
-            },
-            plugins: { legend: { labels: { color: '#eee' } } }
-        }
-    });
-
-    const ctx2 = document.getElementById("energyDeltaChart").getContext("2d");
-    energyDeltaChart = new Chart(ctx2, {
-        type: "bar",
-        data: {
-            labels: CHART_LABELS,
-            datasets: [{
-                label: "Consumo por intervalo (Wh)",
-                data: Array(10).fill(0),
-                borderColor: "#4ade80",
-                backgroundColor: "rgba(74, 222, 128, 0.3)"
-            }]
-        },
-        options: {
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'Wh/intervalo', color: '#eee' }, 
-                     grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#eee' } },
-                x: { grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#eee' } }
-            },
-            plugins: { legend: { labels: { color: '#eee' } } }
-        }
+        options:{scales:{y:{beginAtZero:true}}}
     });
 }
 
-async function fetchData() {
-    try {
-        const r = await fetch("http://192.168.0.21/data"); // URL del ESP32
-        const d = await r.json();
+function actualizarUI(temp, hum, vent, energia){
+    document.getElementById("temp").innerText = temp;
+    document.getElementById("hum").innerText = hum;
+    document.getElementById("energy").innerText = energia.toFixed(3);
+    document.getElementById("estado").innerText = vent ? "Ventilador ENCENDIDO" : "Ventilador APAGADO";
 
-        document.getElementById("temp").innerText   = d.temperature;
-        document.getElementById("hum").innerText    = d.humidity;
-        document.getElementById("energy").innerText = d.energy;
-
-        const toggle = document.getElementById("toggleSwitch");
-
-        if (d.ventState) {
-            document.getElementById("estado").innerText = "Ventilador ENCENDIDO";
-            toggle.checked = true;
-        } else {
-            document.getElementById("estado").innerText = "Ventilador APAGADO";
-            toggle.checked = false;
-        }
-
-        // Actualizar la gráfica de energía acumulada
-        energyChart.data.datasets[0].data = d.chartData;
-        energyChart.update();
-
-        // Actualizar la gráfica de energía por intervalo
-        energyDeltaChart.data.datasets[0].data = d.chartDelta;
-        energyDeltaChart.update();
-    } catch (error) {
-        console.error("Error al obtener datos del ESP32:", error);
-    }
+    chartData.push(energia);
+    if(chartData.length>CHART_SIZE) chartData.shift();
+    energyChart.data.datasets[0].data = chartData;
+    energyChart.update();
 }
 
-document.getElementById("toggleSwitch").addEventListener("change", async (e) => {
-    const state = e.target.checked ? "on" : "off";
-    await fetch(`http://192.168.0.21/fan?state=${state}`);
-    fetchData();
-});
-
-async function autoMode() {
-    await fetch("http://192.168.0.21/auto");
-    fetchData();
+function escucharFirebase(){
+    const ref = db.ref("/");
+    ref.on("value", (snapshot)=>{
+        const data = snapshot.val();
+        actualizarUI(data.temperature, data.humidity, data.ventState, data.energy);
+    });
 }
 
-async function verLog() {
-    const r = await fetch("http://192.168.0.21/log");
-    alert(await r.text());
-}
-
-window.onload = () => {
-    initChart();
-    fetchData();
-    setInterval(fetchData, 2000);
-};
+window.onload = () => { initChart(); escucharFirebase(); };
 </script>
 
 </body>
