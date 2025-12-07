@@ -3,13 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ESP32 Fan Control - Firebase</title>
+<title>Control Ventilador ESP32 - IoT</title>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
-<!-- Firebase -->
-<script src="https://www.gstatic.com/firebasejs/9.25.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.25.0/firebase-database-compat.js"></script>
 
 <style>
+/* (El CSS se mantiene igual al código original) */
 body { background:#111; color:#eee; font-family:Arial; text-align:center; }
 .main-container { display: flex; justify-content: center; flex-wrap: wrap; gap: 20px; }
 .card, .chart-area { background:#1c1f24; padding:20px; border-radius:12px; margin:10px; }
@@ -21,12 +23,11 @@ body { background:#111; color:#eee; font-family:Arial; text-align:center; }
 .slider:before { content:""; position:absolute; height:26px; width:26px; left:4px; bottom:4px; background:white; border-radius:50%; transition:.4s; }
 input:checked + .slider { background:#00c896; }
 input:checked + .slider:before { transform:translateX(26px); }
-button { padding: 10px 20px; border:none; border-radius:8px; background:#00c896; color:#111; cursor:pointer; font-weight:bold; }
 </style>
 </head>
 <body>
 
-<h1>ESP32 FAN CONTROL</h1>
+<h1>ESP32 FAN CONTROL (FIREBASE IoT)</h1>
 
 <div class="main-container">
 
@@ -46,30 +47,48 @@ button { padding: 10px 20px; border:none; border-radius:8px; background:#00c896;
         <div>⚡ Energía total: <span id="energy">--</span> Wh</div>
 
         <h3 id="estado">Ventilador apagado</h3>
+        <p id="modo-actual">MODO: AUTOMÁTICO</p>
 
         <label class="switch">
         <input type="checkbox" id="toggleSwitch">
         <span class="slider"></span>
         </label>
+
+        <br><br>
+        <button onclick="autoMode()">Modo Automático</button>
+        <br><br>
+        <button onclick="verLog()">Ver Registro (Solo en ESP32 Serial)</button>
     </div>
 
 </div>
 
 <script>
-// Configurar Firebase
+// --- CONFIGURACIÓN FIREBASE (REEMPLAZA CON TUS CREDENCIALES PÚBLICAS) ---
 const firebaseConfig = {
-    apiKey: "CIuEHoOaN7J1E84pGlkimA8KOxGrJH6RD430Zpic",
-    databaseURL: "https://esp32-sisp-default-rtdb.firebaseio.com/"
+    apiKey: "TU_API_KEY_WEB_PUBLICA", 
+    authDomain: "esp32-fan-control-60615.firebaseapp.com",
+    databaseURL: "https://esp32-fan-control-60615-default-rtdb.firebaseio.com",
+    projectId: "esp32-fan-control-60615",
+    // Agrega el resto de los parámetros que te dio Firebase
 };
 
 firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+const database = firebase.database();
+const FAN_WATTS = 5.0; // Debe coincidir con el valor del ESP32
 
-// Charts
-let energyChart, energyDeltaChart;
-const CHART_LABELS = [...Array(10).keys()].map(n => "L" + (n+1));
+let energyChart;
+let energyDeltaChart;
+const CHART_SIZE = 10;
+const CHART_LABELS = [...Array(CHART_SIZE).keys()].map(n => `L${n + 1}`);
+
+let chartData = Array(CHART_SIZE).fill(0.0);       // Energía acumulada
+let chartDataDelta = Array(CHART_SIZE).fill(0.0);  // Energía por intervalo
+let lastEnergy = 0.0;                              // Para calcular el incremento
+
+// --------------------------- FUNCIONES DE GRÁFICOS ---------------------------
 
 function initChart() {
+    // Configuración y creación de energyChart (Acumulado)
     const ctx1 = document.getElementById("energyChart").getContext("2d");
     energyChart = new Chart(ctx1, {
         type: "line",
@@ -77,21 +96,19 @@ function initChart() {
             labels: CHART_LABELS,
             datasets: [{
                 label: "Consumo acumulado (Wh)",
-                data: Array(10).fill(0),
+                data: chartData,
                 borderColor: "#00c896",
                 backgroundColor: "rgba(0, 200, 150, 0.2)",
                 tension: 0.4
             }]
         },
         options: {
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'Wh', color: '#eee' }, grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color:'#eee' } },
-                x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color:'#eee' } }
-            },
+            scales: { y: { beginAtZero: true, title: { display: true, text: 'Wh', color: '#eee' }, grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#eee' } }, x: { grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#eee' } } },
             plugins: { legend: { labels: { color: '#eee' } } }
         }
     });
 
+    // Configuración y creación de energyDeltaChart (Por Intervalo)
     const ctx2 = document.getElementById("energyDeltaChart").getContext("2d");
     energyDeltaChart = new Chart(ctx2, {
         type: "bar",
@@ -99,54 +116,112 @@ function initChart() {
             labels: CHART_LABELS,
             datasets: [{
                 label: "Consumo por intervalo (Wh)",
-                data: Array(10).fill(0),
+                data: chartDataDelta,
                 borderColor: "#4ade80",
                 backgroundColor: "rgba(74, 222, 128, 0.3)"
             }]
         },
         options: {
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'Wh/intervalo', color:'#eee' }, grid:{ color:'rgba(255,255,255,0.1)' }, ticks:{ color:'#eee' } },
-                x: { grid:{ color:'rgba(255,255,255,0.1)' }, ticks:{ color:'#eee' } }
-            },
-            plugins: { legend: { labels: { color:'#eee' } } }
+            scales: { y: { beginAtZero: true, title: { display: true, text: 'Wh/intervalo', color: '#eee' }, grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#eee' } }, x: { grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#eee' } } },
+            plugins: { legend: { labels: { color: '#eee' } } }
         }
     });
 }
 
-// Leer datos de Firebase
-function fetchData() {
-    db.ref("/temperature").once("value").then(snapshot => {
-        document.getElementById("temp").innerText = snapshot.val() || "--";
-    });
-    db.ref("/humidity").once("value").then(snapshot => {
-        document.getElementById("hum").innerText = snapshot.val() || "--";
-    });
-    db.ref("/energy").once("value").then(snapshot => {
-        document.getElementById("energy").innerText = snapshot.val() || "--";
-    });
-    db.ref("/ventState").once("value").then(snapshot => {
-        const state = snapshot.val();
+function updateCharts(energiaTotal, energiaIntervalo) {
+    // Mover datos un espacio
+    chartData.shift();
+    chartDataDelta.shift();
+
+    // Añadir el nuevo valor
+    chartData.push(energiaTotal);
+    chartDataDelta.push(energiaIntervalo);
+
+    energyChart.update();
+    energyDeltaChart.update();
+}
+
+
+// --------------------------- COMUNICACIÓN FIREBASE ---------------------------
+
+function startFirebaseListener() {
+    // Escucha la raíz de la base de datos para obtener todos los datos en tiempo real
+    database.ref('/').on('value', (snapshot) => {
+        const data = snapshot.val();
+        
+        if (!data || !data.sensores || !data.estado || !data.comandos) return;
+
+        // --- 1. DATOS DE SENSORES Y ESTADO ---
+        const temp = data.sensores.temperatura || '--';
+        const hum = data.sensores.humedad || '--';
+        const ventState = data.estado.ventState || false;
+        const controlManual = data.comandos.controlManual || false;
+        const totalTimeOn_ms = data.energia.tiempoEncendido_ms || 0;
+        
+        document.getElementById("temp").innerText  = temp.toFixed(1);
+        document.getElementById("hum").innerText   = hum.toFixed(1);
+        
+        // Actualizar el estado del ventilador y el control
+        document.getElementById("modo-actual").innerText = controlManual ? "MODO: MANUAL" : "MODO: AUTOMÁTICO";
+        
         const toggle = document.getElementById("toggleSwitch");
-        document.getElementById("estado").innerText = state ? "Ventilador ENCENDIDO" : "Ventilador APAGADO";
-        toggle.checked = state;
-    });
-    // Graficas
-    db.ref("/chartData").once("value").then(snapshot => {
-        energyChart.data.datasets[0].data = snapshot.val() || Array(10).fill(0);
-        energyChart.update();
-    });
-    db.ref("/chartDelta").once("value").then(snapshot => {
-        energyDeltaChart.data.datasets[0].data = snapshot.val() || Array(10).fill(0);
-        energyDeltaChart.update();
+        
+        // Sincroniza el interruptor con el estado actual reportado por el ESP32
+        toggle.checked = ventState; 
+        document.getElementById("estado").innerText = ventState ? "Ventilador ENCENDIDO" : "Ventilador APAGADO";
+
+        // --- 2. CÁLCULO DE ENERGÍA ---
+        // Energía total (Wh) = (tiempo_ms / 3,600,000) * Watts
+        const energiaTotal = (totalTimeOn_ms / 3600000.0) * FAN_WATTS;
+        document.getElementById("energy").innerText = energiaTotal.toFixed(3);
+
+        // --- 3. ACTUALIZACIÓN DE GRÁFICOS ---
+        const energiaIntervalo = energiaTotal - lastEnergy;
+        // Solo actualizar si ha pasado el tiempo suficiente o si la energía ha cambiado significativamente
+        if (Math.abs(energiaIntervalo) > 0.001) {
+            updateCharts(energiaTotal, energiaIntervalo);
+            lastEnergy = energiaTotal;
+        } else if (chartData.length < CHART_SIZE) {
+            // Rellenar con ceros si es el inicio
+            updateCharts(energiaTotal, 0); 
+        }
     });
 }
 
+// --------------------------- ENVIAR COMANDOS A FIREBASE ---------------------------
+
+// Control Manual
+document.getElementById("toggleSwitch").addEventListener("change", (e) => {
+    const newState = e.target.checked;
+    
+    // 1. Activa el modo manual
+    database.ref('comandos/controlManual').set(true)
+        .then(() => {
+            // 2. Envía el comando de estado deseado
+            return database.ref('comandos/ventState').set(newState);
+        })
+        .catch(error => {
+            console.error("Error al enviar comando manual:", error);
+            alert("Error al enviar comando manual.");
+        });
+});
+
+// Modo Automático
+async function autoMode() {
+    await database.ref('comandos/controlManual').set(false);
+}
+
+function verLog() {
+    alert("El registro de eventos (Log) se imprime únicamente en el Serial Monitor del ESP32.");
+}
+
+// --------------------------- INICIALIZACIÓN ---------------------------
+
 window.onload = () => {
     initChart();
-    fetchData();
-    setInterval(fetchData, 2000);
+    startFirebaseListener();
 };
 </script>
+
 </body>
 </html>
