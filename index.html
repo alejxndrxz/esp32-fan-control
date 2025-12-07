@@ -1,129 +1,162 @@
+String html = R"rawliteral(
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
 <title>Control Ventilador ESP32</title>
-
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-
 <style>
-    body {
-        font-family: Arial, sans-serif;
-        background: #f4f4f4;
-        padding: 20px;
-        text-align: center;
-    }
-
-    .card {
-        background: white;
-        padding: 20px;
-        border-radius: 12px;
-        width: 330px;
-        margin: auto;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-    }
-
-    .btn {
-        padding: 12px 18px;
-        margin: 10px;
-        font-size: 16px;
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        color: white;
-    }
-
-    .on { background: green; }
-    .off { background: red; }
-    .mode { background: #3366ff; }
+body { background:#111; color:#eee; font-family:Arial; text-align:center; }
+.main-container { display: flex; justify-content: center; flex-wrap: wrap; gap: 20px; }
+.card, .chart-area { background:#1c1f24; padding:20px; border-radius:12px; margin:10px; }
+.chart-area { min-width: 400px; max-width: 450px; }
+.card { min-width: 300px; }
+.switch { width:60px; height:34px; position:relative; display:inline-block; }
+.switch input { display:none; }
+.slider { background:#555; position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; transition:.4s; border-radius:34px; }
+.slider:before { content:""; position:absolute; height:26px; width:26px; left:4px; bottom:4px; background:white; border-radius:50%; transition:.4s; }
+input:checked + .slider { background:#00c896; }
+input:checked + .slider:before { transform:translateX(26px); }
 </style>
-
 </head>
 <body>
 
-<h2>Panel de Control - ESP32</h2>
+<h1>ESP32 FAN CONTROL</h1>
 
+<!-- ********************
+     PRIMERA SECCIÓN: PANEL
+     ******************** -->
 <div class="card">
-    <h3>Sensores</h3>
-    <p><b>Temperatura:</b> <span id="temp">--</span> °C</p>
-    <p><b>Humedad:</b> <span id="hum">--</span> %</p>
+    <div>🌡 Temp: <span id="temp">--</span> °C</div>
+    <div>💧 Humedad: <span id="hum">--</span> %</div>
+    <div>⚡ Energía total: <span id="energy">--</span> Wh</div>
 
-    <h3>Ventilador</h3>
-    <p><b>Estado:</b> <span id="fanState">--</span></p>
+    <h3 id="estado">Ventilador apagado</h3>
 
-    <button id="btnOn" class="btn on">Encender</button>
-    <button id="btnOff" class="btn off">Apagar</button>
+    <label class="switch">
+    <input type="checkbox" id="toggleSwitch">
+    <span class="slider"></span>
+    </label>
 
-    <h3>Modo</h3>
-    <p><b>Modo actual:</b> <span id="modeTxt">--</span></p>
+    <br><br>
+    <button onclick="autoMode()">Modo Automático</button>
+    <br><br>
+    <button onclick="verLog()">Ver Registro</button>
+</div>
 
-    <button id="btnAuto" class="btn mode">Modo Automático</button>
-    <button id="btnManual" class="btn mode">Modo Manual</button>
+<!-- ********************
+     SEGUNDA SECCIÓN: GRÁFICAS
+     ******************** -->
+<div class="main-container">
+
+    <div class="chart-area">
+        <h2>Consumo Acumulado (Wh)</h2>
+        <canvas id="energyChart" width="400" height="300"></canvas>
+    </div>
+
+    <div class="chart-area">
+        <h2>Consumo por Intervalo (Wh)</h2>
+        <canvas id="energyDeltaChart" width="400" height="300"></canvas>
+    </div>
 </div>
 
 <script>
-    // ------------------ Firebase Config ------------------
-    var firebaseConfig = {
-        apiKey: "TU_API_KEY",
-        databaseURL: "TU_DB_URL"
-    };
-    firebase.initializeApp(firebaseConfig);
+let energyChart;
+let energyDeltaChart;
+const CHART_LABELS = [...Array(10).keys()].map(n => "L" + (n + 1));
 
-    var db = firebase.database();
-
-    // ------------------ Lecturas en tiempo real ------------------
-
-    // Temperatura
-    db.ref("latest/temperature").on("value", (s) => {
-        document.getElementById("temp").innerText = s.val();
+function initChart() {
+    const ctx1 = document.getElementById("energyChart").getContext("2d");
+    energyChart = new Chart(ctx1, {
+        type: "line",
+        data: {
+            labels: CHART_LABELS,
+            datasets: [{
+                label: "Consumo acumulado (Wh)",
+                data: Array(10).fill(0),
+                borderColor: "#00c896",
+                backgroundColor: "rgba(0, 200, 150, 0.2)",
+                tension: 0.4
+            }]
+        },
+        options: {
+            scales: {
+                y: { beginAtZero: true, ticks:{color:'#eee'}, grid:{color:'rgba(255,255,255,.1)'} },
+                x: { ticks:{color:'#eee'}, grid:{color:'rgba(255,255,255,.1)'} }
+            }
+        }
     });
 
-    // Humedad
-    db.ref("latest/humidity").on("value", (s) => {
-        document.getElementById("hum").innerText = s.val();
+    const ctx2 = document.getElementById("energyDeltaChart").getContext("2d");
+    energyDeltaChart = new Chart(ctx2, {
+        type: "bar",
+        data: {
+            labels: CHART_LABELS,
+            datasets: [{
+                label: "Consumo por intervalo (Wh)",
+                data: Array(10).fill(0),
+                borderColor: "#4ade80",
+                backgroundColor: "rgba(74,222,128,0.3)"
+            }]
+        },
+        options: {
+            scales: {
+                y: { beginAtZero: true, ticks:{color:'#eee'}, grid:{color:'rgba(255,255,255,.1)'} },
+                x: { ticks:{color:'#eee'}, grid:{color:'rgba(255,255,255,.1)'} }
+            }
+        }
     });
+}
 
-    // Estado del ventilador
-    db.ref("latest/ventState").on("value", (s) => {
-        if (s.val() === true) document.getElementById("fanState").innerText = "ENCENDIDO";
-        else document.getElementById("fanState").innerText = "APAGADO";
-    });
+async function fetchData() {
+    const r = await fetch("/data");
+    const d = await r.json();
 
-    // Modo manual/auto
-    db.ref("latest/manualMode").on("value", (s) => {
-        if (s.val() === true)
-            document.getElementById("modeTxt").innerText = "MANUAL";
-        else
-            document.getElementById("modeTxt").innerText = "AUTOMÁTICO";
-    });
+    document.getElementById("temp").innerText   = d.temperature;
+    document.getElementById("hum").innerText    = d.humidity;
+    document.getElementById("energy").innerText = d.energy;
 
-    // ------------------ Botones ------------------
+    const toggle = document.getElementById("toggleSwitch");
 
-    // Encender ventilador (solo manual)
-    document.getElementById("btnOn").onclick = () => {
-        db.ref("latest/manualMode").set(true);  // forzar manual
-        db.ref("latest/ventState").set(true);
-    };
+    if (d.ventState) {
+        document.getElementById("estado").innerText = "Ventilador ENCENDIDO";
+        toggle.checked = true;
+    } else {
+        document.getElementById("estado").innerText = "Ventilador APAGADO";
+        toggle.checked = false;
+    }
 
-    // Apagar ventilador (solo manual)
-    document.getElementById("btnOff").onclick = () => {
-        db.ref("latest/manualMode").set(true);  // forzar manual
-        db.ref("latest/ventState").set(false);
-    };
+    energyChart.data.datasets[0].data = d.chartData;
+    energyChart.update();
 
-    // Cambiar a automático
-    document.getElementById("btnAuto").onclick = () => {
-        db.ref("latest/manualMode").set(false);
-    };
+    energyDeltaChart.data.datasets[0].data = d.chartDelta;
+    energyDeltaChart.update();
+}
 
-    // Cambiar a manual
-    document.getElementById("btnManual").onclick = () => {
-        db.ref("latest/manualMode").set(true);
-    };
+document.getElementById("toggleSwitch").addEventListener("change", async (e) => {
+    const state = e.target.checked ? "on" : "off";
+    await fetch("/fan?state=" + state);
+    fetchData();
+});
 
+async function autoMode() {
+    await fetch("/auto");
+    fetchData();
+}
+
+async function verLog() {
+    const r = await fetch("/log");
+    alert(await r.text());
+}
+
+window.onload = () => {
+    initChart();
+    fetchData();
+    setInterval(fetchData, 2000);
+};
 </script>
 
 </body>
 </html>
+)rawliteral";
