@@ -1,135 +1,154 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Control Ventilador ESP32</title>
-
-<!-- Firebase -->
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-
-<!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Control Ventilador ESP32 - Firebase</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
 <style>
-body {
-    font-family: Arial;
-    background: #111;
-    color: #fff;
-    margin: 0;
-    padding: 20px;
-}
-.card {
-    background: #222;
-    padding: 20px;
-    border-radius: 12px;
-    margin-bottom: 20px;
-}
-button {
-    padding: 12px 20px;
-    background: #0a84ff;
-    border: none;
-    border-radius: 8px;
-    color: white;
-    font-size: 16px;
-    cursor: pointer;
-}
-.status {
-    font-size: 22px;
-    margin-top: 10px;
-    font-weight: bold;
-}
+/* (mantén tu CSS) */
+body { background:#111; color:#eee; font-family:Arial; text-align:center; }
+.main-container { display:flex; justify-content:center; flex-wrap:wrap; gap:20px; }
+.card, .chart-area { background:#1c1f24; padding:20px; border-radius:12px; margin:10px; }
+.chart-area { min-width:400px; max-width:450px; }
+.card { min-width:300px; }
+.switch { width:60px; height:34px; position:relative; display:inline-block; }
+.switch input { display:none; }
+.slider { background:#555; position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; transition:.4s; border-radius:34px; }
+.slider:before { content:""; position:absolute; height:26px; width:26px; left:4px; bottom:4px; background:white; border-radius:50%; transition:.4s; }
+input:checked + .slider { background:#00c896; }
+input:checked + .slider:before { transform:translateX(26px); }
 </style>
 </head>
-
 <body>
+<h1>ESP32 FAN CONTROL (Firebase)</h1>
 
-<h2>Panel de Control</h2>
+<div class="main-container">
+  <div class="chart-area">
+    <h2>Consumo Acumulado (Wh)</h2>
+    <canvas id="energyChart" width="400" height="300"></canvas>
+  </div>
 
-<div class="card">
-    <p>🌡 Temperatura: <span id="temp">--</span> °C</p>
-    <p>💧 Humedad: <span id="hum">--</span> %</p>
+  <div class="chart-area">
+    <h2>Consumo por Intervalo (Wh)</h2>
+    <canvas id="energyDeltaChart" width="400" height="300"></canvas>
+  </div>
 
-    <button id="btnVent">Cargar…</button>
-    <p class="status">Estado: <span id="ventState">--</span></p>
-</div>
+  <div class="card">
+    <div>🌡 Temp: <span id="temp">--</span> °C</div>
+    <div>💧 Humedad: <span id="hum">--</span> %</div>
+    <div>⚡ Energía total: <span id="energy">--</span> Wh</div>
+    <h3 id="estado">Ventilador apagado</h3>
 
-<h2>Gráfica en Tiempo Real</h2>
-<div class="card">
-    <canvas id="chart" height="120"></canvas>
+    <label class="switch">
+      <input type="checkbox" id="toggleSwitch">
+      <span class="slider"></span>
+    </label>
+
+    <br><br>
+    <button id="autoBtn">Modo Automático</button>
+    <br><br>
+    <button id="verLog">Ver Registro</button>
+  </div>
 </div>
 
 <script>
-// ------------------------- CONFIG FIREBASE -------------------------
+/* ---------- CONFIGURA AQUI tu firebaseConfig (la consola te la da) ---------- */
 const firebaseConfig = {
-    apiKey: "TU_API",
-    authDomain: "esp32-sisp.firebaseapp.com",
-    databaseURL: "https://esp32-sisp-default-rtdb.firebaseio.com",
-    projectId: "esp32-sisp",
-    storageBucket: "esp32-sisp.appspot.com",
-    messagingSenderId: "000000000",
-    appId: "1:000000:web:000000"
+  apiKey: "REEMPLAZA_APIKEY",
+  authDomain: "REEMPLAZA.firebaseapp.com",
+  databaseURL: "https://REEMPLAZA.firebaseio.com",
+  projectId: "REEMPLAZA",
+  storageBucket: "REEMPLAZA.appspot.com",
+  messagingSenderId: "XXXX",
+  appId: "1:XXXX:web:XXXX"
 };
-firebase.initializeApp(firebaseConfig);
+/* ------------------------------------------------------------------------- */
 
+firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-// ------------------------- UI DE ESTADO -------------------------
-const tempUI = document.getElementById("temp");
-const humUI = document.getElementById("hum");
-const ventUI = document.getElementById("ventState");
-const btnVent = document.getElementById("btnVent");
+const CHART_LABELS = [...Array(10).keys()].map(n => "L" + (n+1));
 
-// ------------------------- LEER DATOS latest -------------------------
-db.ref("latest").on("value", snap => {
-    const d = snap.val();
-    if (!d) return;
-
-    tempUI.textContent = d.temperature;
-    humUI.textContent = d.humidity;
-    ventUI.textContent = d.ventState ? "Encendido" : "Apagado";
-
-    btnVent.textContent = d.ventState ? "Apagar Ventilador" : "Encender Ventilador";
-});
-
-// ------------------------- CAMBIAR ESTADO -------------------------
-btnVent.onclick = () => {
-    db.ref("latest/ventState").once("value").then(snap => {
-        const newState = !snap.val();
-        db.ref("latest/ventState").set(newState);
-    });
-};
-
-// ------------------------- GRÁFICA -------------------------
-let ctx = document.getElementById("chart").getContext("2d");
-
-let chart = new Chart(ctx, {
+let energyChart, energyDeltaChart;
+function initChart() {
+  const ctx1 = document.getElementById("energyChart").getContext("2d");
+  energyChart = new Chart(ctx1, {
     type: "line",
     data: {
-        labels: [],
-        datasets: [{
-            label: "Temperatura",
-            data: [],
-            borderWidth: 2
-        }]
+      labels: CHART_LABELS,
+      datasets: [{ label:"Consumo acumulado (Wh)", data:Array(10).fill(0), tension:0.4 }]
     },
-    options: {
-        scales: {
-            y: { beginAtZero: false }
-        }
-    }
+    options: { scales:{ y:{ beginAtZero:true } } }
+  });
+
+  const ctx2 = document.getElementById("energyDeltaChart").getContext("2d");
+  energyDeltaChart = new Chart(ctx2, {
+    type: "bar",
+    data: { labels:CHART_LABELS, datasets:[{ label:"Consumo por intervalo", data:Array(10).fill(0) }]},
+    options: { scales:{ y:{ beginAtZero:true } } }
+  });
+}
+
+async function actualizarUI(snapshot) {
+  const d = snapshot.val();
+  if (!d) return;
+  document.getElementById("temp").innerText = d.temperature ?? "--";
+  document.getElementById("hum").innerText  = d.humidity ?? "--";
+  document.getElementById("energy").innerText = d.energy ?? "--";
+
+  const toggle = document.getElementById("toggleSwitch");
+  if (d.ventState) {
+    document.getElementById("estado").innerText = "Ventilador ENCENDIDO";
+    toggle.checked = true;
+  } else {
+    document.getElementById("estado").innerText = "Ventilador APAGADO";
+    toggle.checked = false;
+  }
+
+  if (Array.isArray(d.chartData)) {
+    energyChart.data.datasets[0].data = d.chartData;
+    energyChart.update();
+  }
+  if (Array.isArray(d.chartDelta)) {
+    energyDeltaChart.data.datasets[0].data = d.chartDelta;
+    energyDeltaChart.update();
+  }
+}
+
+function subscribeRealtime() {
+  const ref = db.ref("sensors/latest");
+  ref.on("value", snapshot => actualizarUI(snapshot));
+}
+
+/* Escribir control: /control */
+async function escribirControl(obj) {
+  await db.ref("control").set(obj);
+}
+
+/* Botones y eventos */
+document.getElementById("toggleSwitch").addEventListener("change", async (e) => {
+  const fan = e.target.checked;
+  // Cambiamos a modo manual y forzamos estado
+  await escribirControl({ mode: "manual", fan: !!fan, updatedAt: Date.now() });
 });
 
-// Escuchar chartData
-db.ref("chartData").on("value", snap => {
-    const d = snap.val();
-    if (!d) return;
-
-    chart.data.labels = d.map((_, i) => i);
-    chart.data.datasets[0].data = d;
-    chart.update();
+document.getElementById("autoBtn").addEventListener("click", async () => {
+  await escribirControl({ mode: "auto", updatedAt: Date.now() });
 });
+
+document.getElementById("verLog").addEventListener("click", async () => {
+  const snap = await db.ref("sensors/log").once("value");
+  alert(snap.val() ?? "Sin registro");
+});
+
+/* Inicio */
+window.onload = () => {
+  initChart();
+  subscribeRealtime();
+};
 </script>
 </body>
 </html>
